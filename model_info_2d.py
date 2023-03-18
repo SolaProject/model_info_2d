@@ -33,6 +33,7 @@ class model_info_2d(object):
             2022-09-28 16:41:38 Sola v2 加入了检测proj是否包含坐标转换的方法
             2022-09-28 16:42:12 Sola v2 加入了转化传入对象为numpy数组的功能
             2022-09-28 18:28:38 Sola v2 修正了计算网格id时, 未输出ix, iy的bug
+            2023-03-14 10:02:41 Sola v3 增加输出边界网格的功能(调整get_grid, 使其支持边界宽度及边缘网格id)
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -197,11 +198,32 @@ class model_info_2d(object):
             lon_array, lat_array = lon_array.T, lat_array.T
         return lon_array, lat_array
     
-    def get_grid(self):
+    def get_grid(self, bdy_width=0, type=None):
         """
         范围模式所有网格的经纬度坐标
+        2023-03-14 10:05:43 Sola 更新边界宽度的功能及边缘网格的功能
+                                    获取的边缘网格从左下角开始顺时针排序(左优先)
+        2023-03-14 10:30:23 Sola 经过测试, 代码可以正常运行
         """
         # 获取网格信息, 下标从0开始
-        ys, xs = np.meshgrid(range(self.ny), range(self.nx), indexing='ij')
-        xlon, xlat = self.grid_lonlats(xs, ys) # 从网格信息获取经纬度信息
+        ys, xs = np.meshgrid(range(-bdy_width, self.ny + bdy_width),
+            range(-bdy_width, self.nx + bdy_width), indexing='ij')
+        if type is None:
+            xlon, xlat = self.grid_lonlats(xs, ys) # 从网格信息获取经纬度信息
+        elif type.lower() in ["corner", "c"]: # 四角的网格
+            result = []
+            result.append(self.grid_lonlats(xs - 0.5, ys - 0.5))
+            result.append(self.grid_lonlats(xs - 0.5, ys + 0.5))
+            result.append(self.grid_lonlats(xs + 0.5, ys + 0.5))
+            result.append(self.grid_lonlats(xs + 0.5, ys - 0.5))
+            xlon = np.array([x[0] for x in result])
+            xlat = np.array([x[1] for x in result])
+        elif type.lower() in ["edge", "e"]: # 四边中心的网格
+            result = []
+            result.append(self.grid_lonlats(xs - 0.5, ys))
+            result.append(self.grid_lonlats(xs, ys + 0.5))
+            result.append(self.grid_lonlats(xs + 0.5, ys))
+            result.append(self.grid_lonlats(xs, ys - 0.5))
+            xlon = np.array([x[0] for x in result])
+            xlat = np.array([x[1] for x in result])
         return xlon, xlat
