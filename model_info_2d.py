@@ -28,6 +28,14 @@ class model_info_2d(object):
             2022-08-21 11:29:55 Sola 修改输出网格为ny, nx形式
             2022-08-21 12:25:09 Sola 增加对非经纬度左下角的支持
             2022-08-21 16:27:56 Sola 修正返回网格id数组类型为float的问题
+            2022-09-27 22:19:15 Sola 简化网格生成方法
+            2022-09-28 16:41:03 Sola v2 加入了列表识别, 根据__iter__属性识别合适方法
+            2022-09-28 16:41:38 Sola v2 加入了检测proj是否包含坐标转换的方法
+            2022-09-28 16:42:12 Sola v2 加入了转化传入对象为numpy数组的功能
+            2022-09-28 18:28:38 Sola v2 修正了计算网格id时, 未输出ix, iy的bug
+        测试记录:
+            2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
+            2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
         """
         if type is None:
             self.type = 'unknown'
@@ -69,40 +77,81 @@ class model_info_2d(object):
     def grid_id_float(self, original_x, original_y, original_proj=ccrs.PlateCarree()):
         """
         获取经纬度对应的网格xy值, 返回浮点数
+        2022-09-28 11:05:09 Sola 更新为识别传入的对象类型, 判断是否可迭代
+        2022-09-28 15:21:07 Sola 增加对proj是否包含相应方法的识别
+        2022-09-28 18:25:24 Sola 修正正常情况下未输出ix, iy的bug
         """
-        x, y = self.projection.transform_point(original_x, original_y, original_proj)
-        ix = (x - self.lowerleft_projxy[0])/self.dx
-        iy = (y - self.lowerleft_projxy[1])/self.dy
+        # 如果是可迭代对象, 则丢给对应的功能处理
+        if hasattr(original_x, '__iter__'):
+            ix, iy = self.grid_ids_float(original_x, original_y, original_proj)
+        else: # 如果非可迭代对象, 就有函数本体进行计算
+            # 判断投影本身是否具有计算网格ID方法
+            if hasattr(self.projection, 'grid_id_float'):
+                if original_proj != ccrs.PlateCarree():
+                    # 如果有, 且传入坐标非经纬度坐标, 就将其转化为经纬度坐标
+                    lon, lat = ccrs.PlateCarree().transform_point(
+                        original_x, original_y, original_proj)
+                else: # 否则直接使用xy作为经纬度坐标
+                    lon, lat = original_x, original_y
+                # 调用proj的方法计算经纬度
+                ix, iy = self.projection.grid_id_float(lon, lat)
+            else: # 如果投影方法本身不具备计算网格ID的方法, 那就手动计算网格
+                x, y = self.projection.transform_point(
+                    original_x, original_y, original_proj)
+                ix = (x - self.lowerleft_projxy[0])/self.dx
+                iy = (y - self.lowerleft_projxy[1])/self.dy
         return ix, iy
 
     def grid_id(self, original_x, original_y, original_proj=ccrs.PlateCarree()):
         """
         获取经纬度最近的网格xy值, 返回整数
+        2022-09-28 15:29:32 Sola 增加判断传入的是单个值还是可迭代数组的功能
         """
-        ix, iy = self.grid_id_float(original_x, original_y, original_proj)
-        ix, iy = [round(n) for n in [ix, iy]]
+        if hasattr(original_x, '__iter__'): # 如果传入的是可迭代对象, 则丢给对应函数处理
+            ix, iy = self.grid_ids(original_x, original_y, original_proj)
+        else: # 如果传入的是单个数值, 则由对应功能计算浮点数坐标, 然后取整
+            ix, iy = self.grid_id_float(original_x, original_y, original_proj)
+            ix, iy = [round(n) for n in [ix, iy]]
         return ix, iy
     
-    def grid_ids_float(self, original_x_array, original_y_array, original_proj=ccrs.PlateCarree()):
+    def grid_ids_float(self, original_x_array, original_y_array,
+        original_proj=ccrs.PlateCarree()):
         """
         将经纬度向量或矩阵转换为网格xy值, 返回浮点数
         2022-08-21 16:34:07 Sola 修正了忘了求网格的错误(这错误太不应该了)
         2022-08-21 17:53:45 Sola 修正了两个ix_array的错误(复制粘贴的恶果)
+        2022-09-28 15:34:39 Sola 增加判断proj是否由计算网格id的功能
+        2022-09-28 15:46:50 Sola 简化原本的网格计算, 使用转置的方式代替判断返回数组长度
+        2022-09-28 16:40:27 Sola 增加将输入数组转化为numpy数组的功能, 防止传入列表
+        2022-10-19 18:52:25 Sola 修正了除错距离的bug
+        注意事项:
+            当前存在一个bug, 输入的投影必须是cartopy的投影, 否则无法计算经纬度,
+            但是是否有必要在自己写的proj中加入该功能? 需要考虑
         """
-        result_array = self.projection.transform_points(
-            original_proj, original_x_array, original_y_array
-        )
-        if len(result_array.shape) == 2:
-            result_array[:, 0] = (result_array[:, 0] - self.lowerleft_projxy[0])/self.dx
-            result_array[:, 1] = (result_array[:, 1] - self.lowerleft_projxy[1])/self.dy
-            ix_array, iy_array = result_array[:, 0], result_array[:, 1]
-        else:
-            result_array[:, :, 0] = (result_array[:, :, 0] - self.lowerleft_projxy[0])/self.dx
-            result_array[:, :, 1] = (result_array[:, :, 1] - self.lowerleft_projxy[1])/self.dy
-            ix_array, iy_array = result_array[:, :, 0], result_array[:, :, 1]
+        original_x_array = np.array(original_x_array)
+        original_y_array = np.array(original_y_array)
+        if hasattr(self.projection, 'grid_ids_float'): # 如果投影有相应方法
+            # 判断是否是经纬度坐标, 不是则转化为经纬度坐标
+            if original_proj != ccrs.PlateCarree():
+                lon_array, lat_array, _ = ccrs.PlateCarree().transform_points(
+                    original_proj, original_x_array, original_y_array).T
+                lon_array, lat_array = lon_array.T, lat_array.T
+            else: # 如果是经纬度坐标, 则使用原来的数据
+                lon_array, lat_array = original_x_array, original_y_array
+            # 调用投影的坐标计算方法进行计算
+            ix_array, iy_array = self.projection.grid_ids_float(
+                lon_array, lat_array)
+        else: # 如果没有, 则采用默认方法
+            ix_array, iy_array, _ = self.projection.transform_points(
+                original_proj, original_x_array, original_y_array
+            ).T # 计算转换后的坐标(m)(转置后)
+            # 将m转化为网格坐标
+            ix_array = ((ix_array - self.lowerleft_projxy[0])/ self.dx).T
+            iy_array = ((iy_array - self.lowerleft_projxy[1])/ self.dy).T
         return ix_array, iy_array
     
-    def grid_ids(self, original_x_array, original_y_array, original_proj=ccrs.PlateCarree()):
+    def grid_ids(self, original_x_array, original_y_array,
+        original_proj=ccrs.PlateCarree()):
         """
         将经纬度向量或矩阵转换为网格xy值, 返回整数
         2022-08-21 16:30:39 Sola 修正了返回数组类型为float的问题
@@ -116,35 +165,43 @@ class model_info_2d(object):
     def grid_lonlat(self, ix, iy):
         """
         通过网格id获取经纬度坐标
+        2022-09-28 16:03:27 Sola 增加判断传入的是数值还是数组的功能
+        2022-09-28 16:05:07 Sola 增加判断proj是否有计算网格的功能
         """
-        x = self.lowerleft_projxy[0] + ix * self.dx
-        y = self.lowerleft_projxy[1] + iy * self.dy
-        lon, lat = ccrs.PlateCarree().transform_point(x, y, self.projection)
+        if hasattr(ix, '__iter__'): # 如果传入的是可迭代对象, 则调用相应功能
+            lon, lat = self.grid_lonlats(ix, iy)
+        else: # 如果不是, 则由本函数继续运算
+            if hasattr(self.projection, 'grid_lonlat'): # 如果投影本身可以计算
+                lon, lat = self.projection.grid_lonlat(ix, iy) # 计算网格对应经纬度
+            else: # 如果投影不能根据网格ID计算经纬度, 则手动计算
+                x = self.lowerleft_projxy[0] + ix * self.dx
+                y = self.lowerleft_projxy[1] + iy * self.dy
+                lon, lat = ccrs.PlateCarree().transform_point(x, y, self.projection)
         return lon, lat
     
     def grid_lonlats(self, ix_array, iy_array):
         """
         通过网格id矩阵获得经纬度坐标矩阵
+        2022-09-28 16:07:40 Sola 增加判断proj是否有计算网格的功能
+        2022-09-28 16:08:38 Sola 简化原本的网格计算, 使用转置的方式代替判断返回数组长度
+        2022-09-28 16:40:27 Sola 增加将输入数组转化为numpy数组的功能, 防止传入列表
         """
-        x_array = self.lowerleft_projxy[0] + ix_array * self.dx
-        y_array = self.lowerleft_projxy[1] + iy_array * self.dy
-        result_array = ccrs.PlateCarree().transform_points(self.projection, x_array, y_array)
-        if len(result_array.shape) == 2:
-            lon_array, lat_array = result_array[:, 0], result_array[:, 1]
+        ix_array, iy_array = np.array(ix_array), np.array(iy_array)
+        if hasattr(self.projection, 'grid_lonlats'):
+            lon_array, lat_array = self.projection.grid_lonlats(ix_array, iy_array)
         else:
-            lon_array, lat_array = result_array[:, :, 0], result_array[:, :, 1]
+            x_array = self.lowerleft_projxy[0] + ix_array * self.dx
+            y_array = self.lowerleft_projxy[1] + iy_array * self.dy
+            lon_array, lat_array, _ = ccrs.PlateCarree().transform_points(
+                self.projection, x_array, y_array).T
+            lon_array, lat_array = lon_array.T, lat_array.T
         return lon_array, lat_array
     
     def get_grid(self):
         """
         范围模式所有网格的经纬度坐标
         """
-        zero_x, zero_y = self.lowerleft_projxy
-        array_temp = np.arange(zero_x, zero_x+self.nx*self.dx, self.dx)
-        xlon = np.reshape(array_temp.repeat(self.ny).T, [self.nx, self.ny]).T
-        array_temp = np.arange(zero_y, zero_y+self.ny*self.dy, self.dy)
-        xlat = np.reshape(array_temp.repeat(self.nx), [self.ny, self.nx])
-        array_temp = ccrs.PlateCarree().transform_points(self.projection, xlon, xlat)
-        xlon = array_temp[:, :, 0]
-        xlat = array_temp[:, :, 1]
+        # 获取网格信息, 下标从0开始
+        ys, xs = np.meshgrid(range(self.ny), range(self.nx), indexing='ij')
+        xlon, xlat = self.grid_lonlats(xs, ys) # 从网格信息获取经纬度信息
         return xlon, xlat
