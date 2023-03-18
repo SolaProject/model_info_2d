@@ -38,6 +38,7 @@ class model_info_2d(object):
             2023-03-14 10:02:41 Sola v3 增加输出边界网格的功能(调整get_grid, 使其支持边界宽度及边缘网格id)
             2023-03-18 15:17:40 Sola v4 删除扩展边界的选项
             2023-03-18 15:18:04 Sola v4 修正输入高维数组时, 计算报错的问题
+            2023-03-18 16:22:17 Sola v5 增加支持获取加密网格的方法, 用于超采样清单
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -236,6 +237,23 @@ class model_info_2d(object):
             xlat = np.array([x[1] for x in result])
         return xlon, xlat
 
+    def get_density_grid(self, density=10):
+        """
+        获取一个更密的网格, 原先的每个网格均匀返回多个点, 例如返回10*10=100个点
+            可用于超采样, 以进行清单的分配等操作, 注意不要设置太大的密度, 否则
+            可能内存会寄
+        更新记录:
+            2023-03-18 16:09:39 Sola 编写源代码
+            2023-03-18 16:21:46 Sola 测试功能正常, 从网格到经纬度及反向都正常
+        """
+
+        sub_jj, sub_ii, jj, ii = np.meshgrid(range(density), range(density), 
+            range(self.ny), range(self.nx), indexing='ij')
+        fii = ii - 0.5 + (sub_ii + 0.5)/density
+        fjj = jj - 0.5 + (sub_jj + 0.5)/density
+        xlonf, xlatf = self.grid_lonlats(fii, fjj)
+
+        return xlonf, xlatf
 
 def flat_array(
         x : np.ndarray,
