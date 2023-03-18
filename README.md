@@ -41,7 +41,7 @@ And then, Use your proj to build a subclass of model_info_2d, like this:
 from model_info_2d import model_info_2d, proj_info
 
 class china_15km(model_info_2d):
-    def __init__(self, fun_sim_dat_dir):
+    def __init__(self, fun_sim_dat_dir=None):
         truelat1, truelat2 = 40, 25
         stdlon = 105
         lon1, lat1 = 105, 34
