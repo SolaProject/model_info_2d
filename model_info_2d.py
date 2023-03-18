@@ -236,6 +236,7 @@ class model_info_2d(object):
             xlat = np.array([x[1] for x in result])
         return xlon, xlat
 
+
 def flat_array(
         x : np.ndarray,
         y : np.ndarray
