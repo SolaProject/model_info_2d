@@ -70,4 +70,4 @@ You can also define some other function like read_data:
         return result
 ```
 
-Everything is denpend on you. Good luck!
+Everything is depend on you. Good luck!
