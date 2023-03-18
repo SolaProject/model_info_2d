@@ -54,7 +54,7 @@ class china_15km(model_info_2d):
         super().__init__(proj, nx, ny, dx, dy, lowerleft_lonlat)
 ```
 
-That describe a 15km grid distance domian of East Asia, China. With true latitude of 25° and 40°. The truelat1, truelat2, stdlon, lat1, lat2, dx, dy is same as namelist.wps in WPS. But notise, **the nx and ny is the UNSTAG number (e_we - 1 and e_sn -1 in namelist.wps)**.
+That describe a 15km grid distance domian of East Asia, China. With true latitude of 25° and 40°. The truelat1, truelat2, stdlon(stand_lon), lon1(ref_lon), lat1(ref_lat), dx, dy is same as namelist.wps in WPS. But notise, **the nx and ny is the UNSTAG number (e_we - 1 and e_sn -1 in namelist.wps)**.
 
 You can also define some other function like read_data:
 
