@@ -1,14 +1,25 @@
 import numpy as np
 import cartopy.crs as ccrs
 
-
 class model_info_2d(object):
     """
     用于创建模式网格, 并包含了相关信息, 提供了方便坐标与经纬度相互转换的工具
     基于Numpy和Cartopy.crs构建, 仅支持方形网格
     """
-    def __init__(self, proj, nx, ny, dx, dy, lowerleft=None, \
-        nt=None, dt=None, var_list=None, type=None) -> None:
+    def __init__(
+            self,
+            proj        : ccrs.PlateCarree  = None,
+            nx          : int               = None,
+            ny          : int               = None,
+            dx          : float             = None,
+            dy          : float             = None,
+            lowerleft   : list              = None,
+            nt          : int               = None,
+            dt          : float             = None,
+            var_list    : list              = None,
+            type        : str               = None
+    ) -> None:
+        
         """
         用于初始化网格, 如果不给定左下角经纬度坐标, 则默认投影坐标原点位置为网格
         中心, 并依据此建立网格
@@ -39,46 +50,38 @@ class model_info_2d(object):
             2023-03-18 15:17:40 Sola v4 删除扩展边界的选项
             2023-03-18 15:18:04 Sola v4 修正输入高维数组时, 计算报错的问题
             2023-03-18 16:22:17 Sola v5 增加支持获取加密网格的方法, 用于超采样清单
+            2023-03-19 21:53:51 Sola v0.0.2 加入了默认的网格(经纬度网格), 以方便了解功能
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
         """
-        if type is None:
-            self.type = 'unknown'
-        else:
-            self.type = type # 类型
-        self.nx = nx # x方向网格数
-        self.ny = ny # y方向网格数
-        self.projection = proj # 投影类别, 使用cartopy的crs提供
-        self.dx = dx # 在该投影下x方向间距
-        self.dy = dy # 在该投影下y方向间距
-        if dt is None: # 时间间隔(小时)
-            self.dt = 1
-        else:
-            self.dt = dt
-        if nt is None: # 每个文件中包含多少时间点
-            self.nt = 1
-        else:
-            self.nt = nt
-        if lowerleft is None:
-            zero_lon, zero_lat = ccrs.PlateCarree().transform_point(\
-                -dx*(nx-1)/2, -dy*(ny-1)/2, proj)
-            self.lowerleft = [zero_lon, zero_lat]
-        else:
-            if len(lowerleft) == 2:
-                self.lowerleft = lowerleft # 左下角坐标(经纬度)
-            else:
-                zero_lon, zero_lat = ccrs.PlateCarree().transform_point(\
-                    lowerleft[0], lowerleft[1], lowerleft[2])
+        try:
+            self.type = 'lonlat' if type is None else type # 类型
+            self.nx = 360 if nx is None else nx # x方向网格数
+            self.ny = 180 if ny is None else ny # y 方向网格数
+            self.projection = ccrs.PlateCarree() if proj is None else proj # 投影类别, 使用cartopy的crs提供
+            self.dx = 1 if dx is None else dx # 在该投影下x方向间距
+            self.dy = 1 if dy is None else dy # 在该投影下y方向间距
+            self.dt = 1 if dt is None else dt # 时间间隔(小时)
+            self.nt = 1 if nt is None else nt # 每个文件中包含多少时间点
+            self.var_list = [] if var_list is None else var_list # 变量列表
+            if lowerleft is None:
+                zero_lon, zero_lat = ccrs.PlateCarree().transform_point(
+                    -self.dx*(self.nx-1)/2, -self.dy*(self.ny-1)/2, self.projection)
                 self.lowerleft = [zero_lon, zero_lat]
-        if var_list is None: # 变量列表
-            self.var_list = []
-        else:
-            self.var_list = var_list
-        self.lowerleft_projxy = self.projection.transform_point(
-            self.lowerleft[0], self.lowerleft[1],
-            ccrs.PlateCarree()
-        ) # 计算投影下的坐标
+            else:
+                if len(lowerleft) == 2:
+                    self.lowerleft = lowerleft # 左下角坐标(经纬度)
+                else:
+                    zero_lon, zero_lat = ccrs.PlateCarree().transform_point(\
+                        lowerleft[0], lowerleft[1], lowerleft[2])
+                    self.lowerleft = [zero_lon, zero_lat]
+            self.lowerleft_projxy = self.projection.transform_point(
+                self.lowerleft[0], self.lowerleft[1],
+                ccrs.PlateCarree()
+            ) # 计算投影下的坐标
+        finally:
+            print(f"{self.__dict__}")
 
     def grid_id_float(self, original_x, original_y, original_proj=ccrs.PlateCarree()):
         """
