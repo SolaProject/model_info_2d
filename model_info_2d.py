@@ -310,7 +310,7 @@ def fold_array(
     return x, y
 
 
-def from_wrf(file: str) -> model_info_2d():
+def from_wrf(file: str) -> model_info_2d:
     """
     接受一个文件路径, 其应当是一个由WPS或WRF输出的文件, 包含了WRF模式网格的相关
         信息. 仅识别兰伯特投影
