@@ -51,6 +51,7 @@ class model_info_2d(object):
             2023-03-18 15:18:04 Sola v4 修正输入高维数组时, 计算报错的问题
             2023-03-18 16:22:17 Sola v5 增加支持获取加密网格的方法, 用于超采样清单
             2023-03-19 21:53:51 Sola v0.0.2 加入了默认的网格(经纬度网格), 以方便了解功能
+            2023-04-29 18:54:06 Sola v0.0.3 加入了从WRF读取数据, 以及输出cartopy.crs的功能
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -257,6 +258,21 @@ class model_info_2d(object):
         xlonf, xlatf = self.grid_lonlats(fii, fjj)
 
         return xlonf, xlatf
+    
+    def get_ccrs(self):
+        """
+        获取用于绘图的地图投影, 目前只支持兰伯特投影
+        """
+        from proj_info import proj_LC
+        if type(self.projection) is proj_LC:
+            proj = ccrs.LambertConformal(
+                central_longitude   = self.projection.stdlon,
+                standard_parallels  = [
+                    self.projection.truelat1,
+                    self.projection.truelat2,
+                ],
+            )
+        return proj
 
 def flat_array(
         x : np.ndarray,
@@ -292,3 +308,32 @@ def fold_array(
     x, y = x.reshape(shape), y.reshape(shape)
     
     return x, y
+
+
+def from_wrf(file: str) -> model_info_2d():
+    """
+    接受一个文件路径, 其应当是一个由WPS或WRF输出的文件, 包含了WRF模式网格的相关
+        信息. 仅识别兰伯特投影
+    更新记录:
+        2023-04-29 18:36:30 Sola 编写源代码
+    """
+    
+    # import need library
+    import netCDF4 as nc
+    from proj_info import proj_LC
+    # open dataset
+    with nc.Dataset(file) as nf:
+        if nf.MAP_PROJ == 1: # Lambert proj
+            dx, dy = nf.DX, nf.DY
+            nx, ny = nf.dimensions["west_east"].size, nf.dimensions["south_north"].size
+            truelat1, truelat2 = nf.TRUELAT1, nf.TRUELAT2
+            stdlon = nf.STAND_LON
+            lat1, lon1 = nf.CEN_LAT, nf.CEN_LON
+            # make projection
+            proj = proj_LC(dx=dx, dy=dy, truelat1=truelat1, truelat2=truelat2,
+                        lat1=lat1, lon1=lon1, stdlon=stdlon, nx=nx, ny=ny)
+            # make model_info
+            model = model_info_2d(proj=proj, nx=nx, ny=ny, dx=dx, dy=dy,
+                                lowerleft=proj.grid_lonlat(0, 0))
+
+    return model
