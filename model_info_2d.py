@@ -291,11 +291,11 @@ class model_info_2d(object):
     
     def get_extent(
         self,
-        cx      : int,
-        cy      : int,
-        dx      : int,
-        dy      : int,
-        ratio   : float = 0.8
+        cx      : float,
+        cy      : float,
+        dx      : float,
+        dy      : float,
+        ratio   : float = 1
     ) -> list:
         """
         用于获取指定数据范围的经纬度坐标
@@ -306,10 +306,22 @@ class model_info_2d(object):
             dy: 中心点周围y网格数
         """
         XLON, XLAT = self.get_grid()
-        XLON, XLAT = XLON[cy-dy:cy+dy, cx-dx:cx+dx], XLAT[cy-dy:cy+dy, cx-dx:cx+dx]
-        clon, clat = np.mean(XLON), np.mean(XLAT)
-        dlon, dlat = (np.max(XLON) - np.min(XLON))/2*ratio, (np.max(XLAT) - np.min(XLAT))/2*ratio
-        extent = [clon-dlon, clon+dlon, clat-dlat, clat+dlat]
+        # ys, ye, xs, xe = np.floor(cy-dy), np.ceil(cy+dy), np.floor(cx-dx), np.ceil(cx+dx)
+        lon_start, _ = self.grid_lonlat(cx-dx*ratio, cy)
+        lon_end, _ = self.grid_lonlat(cx+dx*ratio, cy)
+        _, lat_start = self.grid_lonlat(cx, cy-dy*ratio)
+        _, lat_end = self.grid_lonlat(cx, cy+dy*ratio)
+        # if lon_start > lon_end:
+        #     lon_end += 360
+        # XLON, XLAT = XLON[cy-dy:cy+dy, cx-dx:cx+dx], XLAT[cy-dy:cy+dy, cx-dx:cx+dx]
+        # clon, clat = np.mean(XLON), np.mean(XLAT)
+        # dlon, dlat = (np.max(XLON) - np.min(XLON))/2*ratio, (np.max(XLAT) - np.min(XLAT))/2*ratio
+        # clon, clat = (lon_end + lon_start)/2, (lat_end + lat_start)/2
+        # dlon, dlat = (lon_end - lon_start)/2*ratio, (lat_end - lat_start)/2*ratio
+        # extent = [(clon-dlon+180)%360-180, (clon+dlon+180)%360-180, clat-dlat if clat-dlat>=-90 else -90, clat+dlat if clat+dlat<=90 else 90]
+        constrain_lon = lambda x: (x+180)%360-180
+        constrain_lat = lambda x: min(abs(x), 90) * (1 if x > 0 else -1)
+        extent = [constrain_lon(lon_start), constrain_lon(lon_end), constrain_lat(lat_start), constrain_lat(lat_end)]
         return extent
 
 def flat_array(
