@@ -17,7 +17,9 @@ class model_info_2d(object):
             nt          : int               = None,
             dt          : float             = None,
             var_list    : list              = None,
-            type        : str               = None
+            type        : str               = None,
+            globe       : ccrs.Globe        = None,
+            debug       : int               = 0,
     ) -> None:
         
         """
@@ -35,6 +37,8 @@ class model_info_2d(object):
             dt                  : 每个模式输出文件的时间间隔(小时)
             var_list            : 模式包含的变量列表
             type                : 模式的类型(只是一个标记)
+            globe               : 地球形状设定
+            debug               : 设置打印的信息
         更新记录:
             2022-08-20 22:08:27 Sola 编写源代码
             2022-08-20 22:08:33 Sola 添加注释
@@ -52,6 +56,8 @@ class model_info_2d(object):
             2023-03-18 16:22:17 Sola v5 增加支持获取加密网格的方法, 用于超采样清单
             2023-03-19 21:53:51 Sola v0.0.2 加入了默认的网格(经纬度网格), 以方便了解功能
             2023-04-29 18:54:06 Sola v0.0.3 加入了从WRF读取数据, 以及输出cartopy.crs的功能
+            2023-09-07 10:42:59 Sola v0.0.4 设定了默认的地球形状, 以修正默认投影与模式的偏差, 加入globe参数
+                感谢韩雨阳的帮助, 指出了两个差异的问题所在
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -66,6 +72,7 @@ class model_info_2d(object):
             self.dt = 1 if dt is None else dt # 时间间隔(小时)
             self.nt = 1 if nt is None else nt # 每个文件中包含多少时间点
             self.var_list = [] if var_list is None else var_list # 变量列表
+            self.globe = ccrs.Globe(ellipse="sphere", semimajor_axis=6370000, semiminor_axis=6370000) if globe is None else globe
             if lowerleft is None:
                 zero_lon, zero_lat = ccrs.PlateCarree().transform_point(
                     -self.dx*(self.nx-1)/2, -self.dy*(self.ny-1)/2, self.projection)
@@ -82,7 +89,8 @@ class model_info_2d(object):
                 ccrs.PlateCarree()
             ) # 计算投影下的坐标
         finally:
-            print(f"{self.__dict__}")
+            if debug > 0:
+                print(f"{self.__dict__}")
 
     def grid_id_float(self, original_x, original_y, original_proj=ccrs.PlateCarree()):
         """
@@ -241,7 +249,7 @@ class model_info_2d(object):
             xlat = np.array([x[1] for x in result])
         return xlon, xlat
 
-    def get_density_grid(self, density=10):
+    def get_density_grid(self, density=10, flat=False):
         """
         获取一个更密的网格, 原先的每个网格均匀返回多个点, 例如返回10*10=100个点
             可用于超采样, 以进行清单的分配等操作, 注意不要设置太大的密度, 否则
@@ -249,12 +257,16 @@ class model_info_2d(object):
         更新记录:
             2023-03-18 16:09:39 Sola 编写源代码
             2023-03-18 16:21:46 Sola 测试功能正常, 从网格到经纬度及反向都正常
+            2023-10-18 16:19:10 Sola 增加了将结果展开成2D的功能
         """
 
         sub_jj, sub_ii, jj, ii = np.meshgrid(range(density), range(density), 
             range(self.ny), range(self.nx), indexing='ij')
         fii = ii - 0.5 + (sub_ii + 0.5)/density
         fjj = jj - 0.5 + (sub_jj + 0.5)/density
+        if flat:
+            fii = np.transpose(fii, (2, 0, 3, 1)).reshape((self.ny*density, self.nx*density))
+            fjj = np.transpose(fjj, (2, 0, 3, 1)).reshape((self.ny*density, self.nx*density))
         xlonf, xlatf = self.grid_lonlats(fii, fjj)
 
         return xlonf, xlatf
@@ -271,8 +283,32 @@ class model_info_2d(object):
                     self.projection.truelat1,
                     self.projection.truelat2,
                 ],
+                globe = self.globe
             )
         return proj
+    
+    def get_extent(
+        self,
+        cx      : int,
+        cy      : int,
+        dx      : int,
+        dy      : int,
+        ratio   : float = 0.8
+    ) -> list:
+        """
+        用于获取指定数据范围的经纬度坐标
+        参数:
+            cx: 中心点x坐标
+            cy: 中心点y坐标
+            dx: 中心点周围x网格数
+            dy: 中心点周围y网格数
+        """
+        XLON, XLAT = self.get_grid()
+        XLON, XLAT = XLON[cy-dy:cy+dy, cx-dx:cx+dx], XLAT[cy-dy:cy+dy, cx-dx:cx+dx]
+        clon, clat = np.mean(XLON), np.mean(XLAT)
+        dlon, dlat = (np.max(XLON) - np.min(XLON))/2*ratio, (np.max(XLAT) - np.min(XLAT))/2*ratio
+        extent = [clon-dlon, clon+dlon, clat-dlat, clat+dlat]
+        return extent
 
 def flat_array(
         x : np.ndarray,
