@@ -58,6 +58,7 @@ class model_info_2d(object):
             2023-04-29 18:54:06 Sola v0.0.3 加入了从WRF读取数据, 以及输出cartopy.crs的功能
             2023-09-07 10:42:59 Sola v0.0.4 设定了默认的地球形状, 以修正默认投影与模式的偏差, 加入globe参数
                 感谢韩雨阳的帮助, 指出了两个差异的问题所在
+            2023-12-28 15:42:11 Sola v0.0.5 增加了加密网格的功能
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -258,15 +259,16 @@ class model_info_2d(object):
             2023-03-18 16:09:39 Sola 编写源代码
             2023-03-18 16:21:46 Sola 测试功能正常, 从网格到经纬度及反向都正常
             2023-10-18 16:19:10 Sola 增加了将结果展开成2D的功能
+            2023-12-28 15:38:53 Sola 调整了数组顺序, 方便最终展开
         """
 
-        sub_jj, sub_ii, jj, ii = np.meshgrid(range(density), range(density), 
-            range(self.ny), range(self.nx), indexing='ij')
+        jj, sub_jj, ii, sub_ii = np.meshgrid(range(self.ny), range(density), 
+            range(self.nx), range(density), indexing='ij')
         fii = ii - 0.5 + (sub_ii + 0.5)/density
         fjj = jj - 0.5 + (sub_jj + 0.5)/density
         if flat:
-            fii = np.transpose(fii, (2, 0, 3, 1)).reshape((self.ny*density, self.nx*density))
-            fjj = np.transpose(fjj, (2, 0, 3, 1)).reshape((self.ny*density, self.nx*density))
+            fii = fii.reshape((self.ny*density, self.nx*density))
+            fjj = fjj.reshape((self.ny*density, self.nx*density))
         xlonf, xlatf = self.grid_lonlats(fii, fjj)
 
         return xlonf, xlatf
