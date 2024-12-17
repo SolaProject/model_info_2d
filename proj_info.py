@@ -1,9 +1,11 @@
 import numpy as np
 from math import radians, cos, tan, log10, sin, sqrt, atan2, atan, degrees
+import logging
 
 """
 更新记录:
     2022-09-23 11:59:01 Sola v1 编写源代码, 修正set_lc代码错误的问题
+    2024-12-16 09:54:40 Sola v2 增加变量检测的内容
 """
 
 EARTH_RADIUS_M = 6370000.
@@ -55,6 +57,34 @@ class proj_info(object):
         self.comp_ll    = comp_ll
         self.gauss_lat  = gauss_lat
 
+        if self.lat1:
+            if abs(self.lat1) > 90:
+                logging.error("Latitude of origin corner required as follows: -90N <= lat1 < = 90.N")
+        if self.lon1: # 限制经度范围
+            dummy_lon1 = (self.lon1 + 180) % 360 - 180
+            self.lon1 = dummy_lon1
+        if self.lon0: # 限制中央经线范围
+            dummy_lon0 = (self.lon0 + 180) % 360 - 180
+            self.lon0 = dummy_lon0
+        if self.dx:
+            if self.dx <= 0 and self.code != "PROJ_LATLON":
+                logging.error("Require grid spacing (dx) in meters be positive!")
+        if self.stdlon:
+            dummp_stdlon = (self.stdlon + 180) % 360 - 180
+            self.stdlon = dummp_stdlon
+        if self.truelat1:
+            if abs(self.truelat1) > 90:
+                logging.error("Set true latitude 1 for all projections!")
+        if not self.dy and self.dx: # 设置dy, 如果dy不存在, 则利用dx给定
+            self.dy = self.dx
+        if self.dx:
+            if self.code in ["PROJ_LC", "PROJ_PS", "PROJ_PS_WGS84", "PROJ_A:NERS_NAD83", "PROJ_MERC"]:
+                if self.truelat1 < 0: # 所在半球, 1为北半球, -1为南半球
+                    self.hemi = -1
+                else:
+                    self.hemi = 1
+                self.rebydx = self.re_m / self.dx # 地球半径除以网格距
+        
 
 class proj_LC(proj_info):
     """
@@ -259,6 +289,73 @@ class proj_LC(proj_info):
         cy = (cy1 + cy2) / 2
         return (ix - cx) * self.dx, (iy - cy) * self.dy
 
+class proj_MERC(proj_info):
+    """
+    参考WPS源码中的proj_LC改写, 因为WRF计算得到的网格与cartopy的不同
+    更新记录:
+        2022-09-22 22:07:51 Sola 编写源代码
+    """
+    def __init__(self, code='PROJ_MERC', truelat1=None, lat1=None,
+        lon1=None, knowni=None, knownj=None, stdlon=None, dx=None,
+        dy=None, nx=None, ny=None, re_m=EARTH_RADIUS_M) -> None:
+        """
+        初始化
+        必要参数:
+            code        投影编码
+            truelat1    标准纬线1
+            truelat2    标准纬线2
+            lat1        参考点纬度
+            lon1        参考点经度
+            stdlon      中央经线
+            dx          x方向网格距(m)
+            nx          x方向格点数
+            ny          y方向格点数
+        可选参数:
+            knowni      参考点x方向坐标, 默认为网格中心
+            knownj      参考点y方向坐标, 默认为网格中心
+            dy          y方向网格距(m), 默认与dx一致
+            re_m        地球半径, 默认为6370000
+        """
+        if truelat1 is None is None or lat1 is None or lon1 is None\
+            or nx is None or ny is None or dx is None:
+            print('[ERROR] cannot generate proj!')
+        if abs(lat1) > 90 or dx <= 0 or truelat1 > 90:
+            pass
+        dummy_lon1 = (lon1 + 180) % 360 - 180       # 限制经度范围
+        dummy_stdlon = (stdlon + 180) % 360 - 180   # 限制中央经线范围
+        if knowni is None and knownj is None:
+            knowni = (nx + 1) / 2
+            knownj = (ny + 1) / 2
+        if dy is None:          # 设置dy, 如果dy不存在, 则利用dx给定
+            dy = dx
+        if truelat1 < 0:        # 所在半球, 1为北半球, -1为南半球
+            hemi = -1
+        else:
+            hemi = 1
+        if abs(truelat2) > 90:  # 如果标准纬线2超过范围, 则用标准纬线1赋值
+            truelat2 = truelat1
+        super().__init__(code=code, lat1=lat1, lon1=dummy_lon1, dx=dx, dy=dy, 
+            stdlon=dummy_stdlon, truelat1=truelat1, truelat2=truelat2, hemi=hemi, 
+            knowni=knowni, knownj=knownj, re_m=re_m) # 初始化各变量
+        self.rebydx = re_m / dx # 地球半径除以网格距
+        self.set_lc()           # 计算其他变量
+        self.check_init()       # 确认是否所有变量都计算完毕
+    def set_merc(self):
+        clain = np.cos(np.deg2rad(self.truelat1))
+        self.dlon = self.dx / (self.re_m * clain)
+        # 计算原点到迟到的距离，并保存在 self.rsw 变量中
+        self.rsw = 0 if self.lat1 == 0 else np.log(np.tan(0.5*(np.deg2rad(self.lat1+90))))/self.dlon
+    def llij_merc(self, lat, lon):
+        deltalon = lon - self.lon1
+        deltalon = (deltalon + 180) % 360 - 180
+        i = self.knowni + deltalon / np.rad2deg(self.dlon)
+        j = self.knownj + np.log(np.tan(0.5*np.deg2rad(lat + 90)))/self.dlon - self.rsw
+        return i, j
+    def ijll_merc(self, i, j):
+        lat = np.rad2deg(2*np.arctan(np.exp(self.dlon*(self.rsw + j - self.knownj)))) - 90
+        lon = (i - self.knowni) * np.rad2deg(self.dlon) + self.lon1
+        lon = (lon + 180) % 360 - 180
+        return lon, lat
 
 if __name__ == '__main__':
     proj = proj_LC(truelat1=45, truelat2=15, lat1=30, lon1=108, stdlon=108, dx=3000, dy=3000, nx=2025, ny=2025)

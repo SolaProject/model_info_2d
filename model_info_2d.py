@@ -17,7 +17,9 @@ class model_info_2d(object):
             nt          : int               = None,
             dt          : float             = None,
             var_list    : list              = None,
-            type        : str               = None
+            type        : str               = None,
+            globe       : ccrs.Globe        = None,
+            debug       : int               = 0,
     ) -> None:
         
         """
@@ -35,6 +37,8 @@ class model_info_2d(object):
             dt                  : 每个模式输出文件的时间间隔(小时)
             var_list            : 模式包含的变量列表
             type                : 模式的类型(只是一个标记)
+            globe               : 地球形状设定
+            debug               : 设置打印的信息
         更新记录:
             2022-08-20 22:08:27 Sola 编写源代码
             2022-08-20 22:08:33 Sola 添加注释
@@ -52,6 +56,9 @@ class model_info_2d(object):
             2023-03-18 16:22:17 Sola v5 增加支持获取加密网格的方法, 用于超采样清单
             2023-03-19 21:53:51 Sola v0.0.2 加入了默认的网格(经纬度网格), 以方便了解功能
             2023-04-29 18:54:06 Sola v0.0.3 加入了从WRF读取数据, 以及输出cartopy.crs的功能
+            2023-09-07 10:42:59 Sola v0.0.4 设定了默认的地球形状, 以修正默认投影与模式的偏差, 加入globe参数
+                感谢韩雨阳的帮助, 指出了两个差异的问题所在
+            2024-07-22 20:36:52 Sola v0.0.5 增加了判断坐标（坐标数组）是否在模式网格内的功能
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -66,6 +73,7 @@ class model_info_2d(object):
             self.dt = 1 if dt is None else dt # 时间间隔(小时)
             self.nt = 1 if nt is None else nt # 每个文件中包含多少时间点
             self.var_list = [] if var_list is None else var_list # 变量列表
+            self.globe = ccrs.Globe(ellipse="sphere", semimajor_axis=6370000, semiminor_axis=6370000) if globe is None else globe
             if lowerleft is None:
                 zero_lon, zero_lat = ccrs.PlateCarree().transform_point(
                     -self.dx*(self.nx-1)/2, -self.dy*(self.ny-1)/2, self.projection)
@@ -82,7 +90,8 @@ class model_info_2d(object):
                 ccrs.PlateCarree()
             ) # 计算投影下的坐标
         finally:
-            print(f"{self.__dict__}")
+            if debug > 0:
+                print(f"{self.__dict__}")
 
     def grid_id_float(self, original_x, original_y, original_proj=ccrs.PlateCarree()):
         """
@@ -214,16 +223,18 @@ class model_info_2d(object):
     def get_grid(self, type=None):
         """
         范围模式所有网格的经纬度坐标
+        type: None | "corner" | "edge" | "corner_2d"
         2023-03-14 10:05:43 Sola 更新边界宽度的功能及边缘网格的功能
                                     获取的边缘网格从左下角开始顺时针排序(左优先)
         2023-03-14 10:30:23 Sola 经过测试, 代码可以正常运行
         2023-03-18 15:40:20 Sola 删除边界宽度的功能(没有用了)
+        2024-08-02 18:01:48 Sola 添加生成边界经纬度的功能
         """
         # 获取网格信息, 下标从0开始
         ys, xs = np.meshgrid(range(self.ny), range(self.nx), indexing='ij')
         if type is None:
             xlon, xlat = self.grid_lonlats(xs, ys) # 从网格信息获取经纬度信息
-        elif type.lower() in ["corner", "c"]: # 四角的网格
+        elif type.lower() in ["corner", "c"]: # 四角的网格 (4, ny, nx)
             result = []
             result.append(self.grid_lonlats(xs - 0.5, ys - 0.5))
             result.append(self.grid_lonlats(xs - 0.5, ys + 0.5))
@@ -239,9 +250,12 @@ class model_info_2d(object):
             result.append(self.grid_lonlats(xs, ys - 0.5))
             xlon = np.array([x[0] for x in result])
             xlat = np.array([x[1] for x in result])
+        elif type.lower() in ["corner_2d", "c2d"]: # 四角网络 (ny + 1, nx + 1)
+            ys, xs = np.meshgrid(range(self.ny+1), range(self.nx+1), indexing='ij')
+            xlon, xlat = self.grid_lonlats(xs-0.5, ys-0.5)
         return xlon, xlat
 
-    def get_density_grid(self, density=10):
+    def get_density_grid(self, density=10, flat=False):
         """
         获取一个更密的网格, 原先的每个网格均匀返回多个点, 例如返回10*10=100个点
             可用于超采样, 以进行清单的分配等操作, 注意不要设置太大的密度, 否则
@@ -249,12 +263,16 @@ class model_info_2d(object):
         更新记录:
             2023-03-18 16:09:39 Sola 编写源代码
             2023-03-18 16:21:46 Sola 测试功能正常, 从网格到经纬度及反向都正常
+            2023-10-18 16:19:10 Sola 增加了将结果展开成2D的功能
         """
 
         sub_jj, sub_ii, jj, ii = np.meshgrid(range(density), range(density), 
             range(self.ny), range(self.nx), indexing='ij')
         fii = ii - 0.5 + (sub_ii + 0.5)/density
         fjj = jj - 0.5 + (sub_jj + 0.5)/density
+        if flat:
+            fii = np.transpose(fii, (2, 0, 3, 1)).reshape((self.ny*density, self.nx*density))
+            fjj = np.transpose(fjj, (2, 0, 3, 1)).reshape((self.ny*density, self.nx*density))
         xlonf, xlatf = self.grid_lonlats(fii, fjj)
 
         return xlonf, xlatf
@@ -271,8 +289,57 @@ class model_info_2d(object):
                     self.projection.truelat1,
                     self.projection.truelat2,
                 ],
+                globe = self.globe
             )
         return proj
+    
+    def get_extent(
+        self,
+        cx      : float = None,
+        cy      : float = None,
+        dx      : float = None,
+        dy      : float = None,
+        ratio   : float = 1
+    ) -> list:
+        """
+        用于获取指定数据范围的经纬度坐标
+        参数:
+            cx: 中心点x坐标
+            cy: 中心点y坐标
+            dx: 中心点周围x网格数
+            dy: 中心点周围y网格数
+        """
+        if cx is None:
+            cx, cy, dx, dy = self.nx/2, self.ny/2, self.nx/2, self.ny/2
+        XLON, XLAT = self.get_grid()
+        # ys, ye, xs, xe = np.floor(cy-dy), np.ceil(cy+dy), np.floor(cx-dx), np.ceil(cx+dx)
+        lon_start, _ = self.grid_lonlat(cx-dx*ratio, cy)
+        lon_end, _ = self.grid_lonlat(cx+dx*ratio, cy)
+        _, lat_start = self.grid_lonlat(cx, cy-dy*ratio)
+        _, lat_end = self.grid_lonlat(cx, cy+dy*ratio)
+        # if lon_start > lon_end:
+        #     lon_end += 360
+        # XLON, XLAT = XLON[cy-dy:cy+dy, cx-dx:cx+dx], XLAT[cy-dy:cy+dy, cx-dx:cx+dx]
+        # clon, clat = np.mean(XLON), np.mean(XLAT)
+        # dlon, dlat = (np.max(XLON) - np.min(XLON))/2*ratio, (np.max(XLAT) - np.min(XLAT))/2*ratio
+        # clon, clat = (lon_end + lon_start)/2, (lat_end + lat_start)/2
+        # dlon, dlat = (lon_end - lon_start)/2*ratio, (lat_end - lat_start)/2*ratio
+        # extent = [(clon-dlon+180)%360-180, (clon+dlon+180)%360-180, clat-dlat if clat-dlat>=-90 else -90, clat+dlat if clat+dlat<=90 else 90]
+        constrain_lon = lambda x: (x+180)%360-180
+        constrain_lat = lambda x: min(abs(x), 90) * (1 if x > 0 else -1)
+        extent = [constrain_lon(lon_start), constrain_lon(lon_end), constrain_lat(lat_start), constrain_lat(lat_end)]
+        return extent
+    
+    def is_in_domain(self, origin_x, origin_y, use_float=False):
+        """
+        用于判断坐标（经纬度）是否在模式网格范围内
+        """
+        if use_float:
+            ix, iy = self.grid_id_float(origin_x, origin_y)
+        else:
+            ix, iy = self.grid_id(origin_x, origin_y)
+        result = (0 <= ix) & (ix < self.nx) & (0 <= iy) & (iy < self.ny)
+        return result
 
 def flat_array(
         x : np.ndarray,
