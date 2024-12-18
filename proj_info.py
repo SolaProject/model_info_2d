@@ -260,7 +260,6 @@ class proj_MERC(proj_info):
         必要参数:
             code        投影编码
             truelat1    标准纬线1
-            truelat2    标准纬线2
             lat1        参考点纬度
             lon1        参考点经度
             stdlon      中央经线

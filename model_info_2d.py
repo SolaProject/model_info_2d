@@ -1,5 +1,6 @@
 import numpy as np
 import cartopy.crs as ccrs
+from .proj_info import proj_LC, proj_MERC
 
 class model_info_2d(object):
     """
@@ -281,7 +282,6 @@ class model_info_2d(object):
         """
         获取用于绘图的地图投影, 目前只支持兰伯特投影
         """
-        from proj_info import proj_LC
         if type(self.projection) is proj_LC:
             proj = ccrs.LambertConformal(
                 central_longitude   = self.projection.stdlon,
@@ -291,6 +291,13 @@ class model_info_2d(object):
                 ],
                 globe = self.globe
             )
+        elif type(self.projection) is proj_MERC:
+            proj = ccrs.Mercator(
+                central_longitude=self.projection.stdlon,
+                globe = self.globe
+            )
+        else:
+            proj = ccrs.PlateCarree(globe = self.globe)
         return proj
     
     def get_extent(
@@ -387,20 +394,22 @@ def from_wrf(file: str) -> model_info_2d:
     
     # import need library
     import netCDF4 as nc
-    from proj_info import proj_LC
     # open dataset
     with nc.Dataset(file) as nf:
+        dx, dy = nf.DX, nf.DY
+        nx, ny = nf.dimensions["west_east"].size, nf.dimensions["south_north"].size
+        truelat1 = nf.TRUELAT1
+        stdlon = nf.STAND_LON
+        lat1, lon1 = nf.CEN_LAT, nf.CEN_LON
         if nf.MAP_PROJ == 1: # Lambert proj
-            dx, dy = nf.DX, nf.DY
-            nx, ny = nf.dimensions["west_east"].size, nf.dimensions["south_north"].size
-            truelat1, truelat2 = nf.TRUELAT1, nf.TRUELAT2
-            stdlon = nf.STAND_LON
-            lat1, lon1 = nf.CEN_LAT, nf.CEN_LON
+            truelat2 = nf.TRUELAT2
             # make projection
             proj = proj_LC(dx=dx, dy=dy, truelat1=truelat1, truelat2=truelat2,
                         lat1=lat1, lon1=lon1, stdlon=stdlon, nx=nx, ny=ny)
-            # make model_info
-            model = model_info_2d(proj=proj, nx=nx, ny=ny, dx=dx, dy=dy,
-                                lowerleft=proj.grid_lonlat(0, 0))
-
+        elif nf.MAP_PROJ == 3: # Mercator proj
+            proj = proj_MERC(dx=dx, dy=dy, truelat1=truelat1, lat1=lat1,
+                             lon1=lon1, stdlon=stdlon, nx=nx, ny=ny)
+        # make model_info
+        model = model_info_2d(proj=proj, nx=nx, ny=ny, dx=dx, dy=dy,
+                            lowerleft=proj.grid_lonlat(0, 0))
     return model
