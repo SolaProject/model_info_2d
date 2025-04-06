@@ -1,5 +1,6 @@
 import numpy as np
 import cartopy.crs as ccrs
+from typing import Union
 from .proj_info import proj_LC, proj_MERC
 
 class model_info_2d(object):
@@ -15,12 +16,15 @@ class model_info_2d(object):
             dx          : float             = None,
             dy          : float             = None,
             lowerleft   : list              = None,
+            center      : list              = None,
             nt          : int               = None,
             dt          : float             = None,
             var_list    : list              = None,
             type        : str               = None,
             globe       : ccrs.Globe        = None,
             debug       : int               = 0,
+            rotate_deg  : Union[int, float] = 0,
+            rotate_poi  : list              = None,
     ) -> None:
         
         """
@@ -60,6 +64,9 @@ class model_info_2d(object):
             2023-09-07 10:42:59 Sola v0.0.4 设定了默认的地球形状, 以修正默认投影与模式的偏差, 加入globe参数
                 感谢韩雨阳的帮助, 指出了两个差异的问题所在
             2024-07-22 20:36:52 Sola v0.0.5 增加了判断坐标（坐标数组）是否在模式网格内的功能
+            2024-12-18 10:11:55 Sola v0.0.6 增加了与墨卡托投影相关的计算内容
+            2025-04-06 16:39:26 Sola v0.0.7 增加提供网格中心坐标计算网格的功能（优先级低于左下角坐标）
+            2025-04-06 16:45:22 Sola v0.0.8 增加坐标旋转功能
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -76,8 +83,12 @@ class model_info_2d(object):
             self.var_list = [] if var_list is None else var_list # 变量列表
             self.globe = ccrs.Globe(ellipse="sphere", semimajor_axis=6370000, semiminor_axis=6370000) if globe is None else globe
             if lowerleft is None:
+                if not center is None:
+                    center_x, center_y = self.projection.transform_point(center[0], center[1], ccrs.PlateCarree())
+                else:
+                    center_x, center_y = 0, 0
                 zero_lon, zero_lat = ccrs.PlateCarree().transform_point(
-                    -self.dx*(self.nx-1)/2, -self.dy*(self.ny-1)/2, self.projection)
+                    center_x-self.dx*(self.nx-1)/2, center_y-self.dy*(self.ny-1)/2, self.projection)
                 self.lowerleft = [zero_lon, zero_lat]
             else:
                 if len(lowerleft) == 2:
@@ -90,6 +101,11 @@ class model_info_2d(object):
                 self.lowerleft[0], self.lowerleft[1],
                 ccrs.PlateCarree()
             ) # 计算投影下的坐标
+            self.rotate = 0 if rotate_deg is None else np.deg2rad(rotate_deg)
+            if rotate_poi is None:
+                self.rotate_poi_x, self.rotate_poi_y = 0, 0
+            else:
+                self.rotate_poi_x, self.rotate_poi_y = self.projection.transform_point(*rotate_poi, ccrs.PlateCarree())
         finally:
             if debug > 0:
                 print(f"{self.__dict__}")
@@ -409,7 +425,27 @@ def from_wrf(file: str) -> model_info_2d:
         elif nf.MAP_PROJ == 3: # Mercator proj
             proj = proj_MERC(dx=dx, dy=dy, truelat1=truelat1, lat1=lat1,
                              lon1=lon1, stdlon=stdlon, nx=nx, ny=ny)
+        elif nf.MAP_PROJ == 6: # lon-lat proj
+            proj = ccrs.PlateCarree
+            dx /= 111177.473
+            dy /= 111177.473
+            
         # make model_info
         model = model_info_2d(proj=proj, nx=nx, ny=ny, dx=dx, dy=dy,
                             lowerleft=proj.grid_lonlat(0, 0))
+    return model
+
+def from_ctl(file: str) -> model_info_2d:
+    with open(file, "r") as f:
+        lines = f.readlines()
+    for line in lines:
+        if "PDEF" in line.upper():
+            if "LCC" in line.upper():
+                _, nx, ny, _, lat1, lon1, knowi, knowj, truelat1, truelat2, stdlon, dx, dy = line.split()
+                nx, ny = int(nx), int(ny)
+                lat1, lon1, knowi, knowj, truelat1, truelat2, stdlon, dx, dy =\
+                    float(lat1), float(lon1), float(knowi), float(knowj), float(truelat1), float(truelat2), float(stdlon), float(dx), float(dy)
+                proj = proj_LC(dx=dx, dy=dy, truelat1=truelat1, truelat2=truelat2, lat1=lat1, lon1=lon1,
+                    knowni=knowi, knownj=knowj, stdlon=stdlon, nx=nx, ny=ny)
+    model = model_info_2d(proj=proj, nx=nx, ny=ny, dx=dx, dy=dy, lowerleft=proj.grid_lonlat(0, 0))
     return model

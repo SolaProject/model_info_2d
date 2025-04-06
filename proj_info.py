@@ -9,8 +9,8 @@ import logging
     2024-12-17 15:39:45 Sola v3 增加墨卡托投影
 """
 
-logging.basicConfig(format='[%(asctime)s][%(levelname)s]: %(message)s',
-                    level=logging.DEBUG, datefmt='%Y-%m-%dT%H:%M:%S %Z')
+# logging.basicConfig(format='[%(asctime)s][%(levelname)s]: %(message)s',
+#                     level=logging.DEBUG, datefmt='%Y-%m-%dT%H:%M:%S %Z')
 EARTH_RADIUS_M = 6370000.
 
 class proj_info(object):
