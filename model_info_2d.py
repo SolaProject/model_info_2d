@@ -63,10 +63,12 @@ class model_info_2d(object):
             2023-04-29 18:54:06 Sola v0.0.3 加入了从WRF读取数据, 以及输出cartopy.crs的功能
             2023-09-07 10:42:59 Sola v0.0.4 设定了默认的地球形状, 以修正默认投影与模式的偏差, 加入globe参数
                 感谢韩雨阳的帮助, 指出了两个差异的问题所在
-            2024-07-22 20:36:52 Sola v0.0.5 增加了判断坐标（坐标数组）是否在模式网格内的功能
-            2024-12-18 10:11:55 Sola v0.0.6 增加了与墨卡托投影相关的计算内容
-            2025-04-06 16:39:26 Sola v0.0.7 增加提供网格中心坐标计算网格的功能（优先级低于左下角坐标）
-            2025-04-06 16:45:22 Sola v0.0.8 增加坐标旋转功能
+            2023-12-28 15:42:11 Sola v0.0.5 增加了加密网格的功能
+            2023-12-28 15:54:53 Sola v0.0.6 增加了获取绘图范围的功能, 并使其接受浮点数输入
+            2024-07-22 20:36:52 Sola v0.0.7 增加了判断坐标（坐标数组）是否在模式网格内的功能
+            2024-12-18 10:11:55 Sola v0.0.8 增加了与墨卡托投影相关的计算内容
+            2025-04-06 16:39:26 Sola v0.0.9 增加提供网格中心坐标计算网格的功能（优先级低于左下角坐标）
+            2025-04-06 16:45:22 Sola v0.0.10 增加坐标旋转功能
                 修改的关键在于：
                 1. 在将经纬度转化为网格的时候, 围绕中心对网格进行偏移旋转, 需要增加一步后处理
                 2. 在将网格转化为经纬度的时候, 需要先将输入的网格ID旋转回去, 再计算其经纬度
@@ -301,15 +303,16 @@ class model_info_2d(object):
             2023-03-18 16:09:39 Sola 编写源代码
             2023-03-18 16:21:46 Sola 测试功能正常, 从网格到经纬度及反向都正常
             2023-10-18 16:19:10 Sola 增加了将结果展开成2D的功能
+            2023-12-28 15:38:53 Sola 调整了数组顺序, 方便最终展开
         """
 
-        sub_jj, sub_ii, jj, ii = np.meshgrid(range(density), range(density), 
-            range(self.ny), range(self.nx), indexing='ij')
+        jj, sub_jj, ii, sub_ii = np.meshgrid(range(self.ny), range(density), 
+            range(self.nx), range(density), indexing='ij')
         fii = ii - 0.5 + (sub_ii + 0.5)/density
         fjj = jj - 0.5 + (sub_jj + 0.5)/density
         if flat:
-            fii = np.transpose(fii, (2, 0, 3, 1)).reshape((self.ny*density, self.nx*density))
-            fjj = np.transpose(fjj, (2, 0, 3, 1)).reshape((self.ny*density, self.nx*density))
+            fii = fii.reshape((self.ny*density, self.nx*density))
+            fjj = fjj.reshape((self.ny*density, self.nx*density))
         xlonf, xlatf = self.grid_lonlats(fii, fjj)
 
         return xlonf, xlatf
