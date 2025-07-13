@@ -297,6 +297,12 @@ class proj_MERC(proj_info):
         lon = (i - self.knowni) * np.rad2deg(self.dlon) + self.lon1
         lon = (lon + 180) % 360 - 180
         return lon, lat
+    
+    def transform_point(self, lon, lat, proj_useless=None):
+        """返回对应经纬度坐标的网格坐标(m)"""
+        ix, iy = self.llij(lon, lat)
+        cx, cy = self.llij(self.stdlon, self.truelat1)
+        return (ix - cx) * self.dx, (iy - cy) * self.dy
 
 if __name__ == '__main__':
     """

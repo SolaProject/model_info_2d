@@ -16,13 +16,13 @@ class model_info_2d(object):
             dx          : float             = None,
             dy          : float             = None,
             lowerleft   : list              = None,
-            center      : list              = None,
             nt          : int               = None,
             dt          : float             = None,
             var_list    : list              = None,
             type        : str               = None,
             globe       : ccrs.Globe        = None,
             debug       : int               = 0,
+            center      : list              = None,
             rotate_deg  : Union[int, float] = 0,
             rotate_poi  : list              = None,
     ) -> None:
@@ -67,6 +67,11 @@ class model_info_2d(object):
             2024-12-18 10:11:55 Sola v0.0.6 增加了与墨卡托投影相关的计算内容
             2025-04-06 16:39:26 Sola v0.0.7 增加提供网格中心坐标计算网格的功能（优先级低于左下角坐标）
             2025-04-06 16:45:22 Sola v0.0.8 增加坐标旋转功能
+                修改的关键在于：
+                1. 在将经纬度转化为网格的时候, 围绕中心对网格进行偏移旋转, 需要增加一步后处理
+                2. 在将网格转化为经纬度的时候, 需要先将输入的网格ID旋转回去, 再计算其经纬度
+                设计的网格旋转函数需要保证旋转前后中心位置不变，各网格相对位置不变即可
+                注意, 这里输入的左下角坐标与通过中心计算的左下角坐标均为旋转前的
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -89,22 +94,29 @@ class model_info_2d(object):
                     center_x, center_y = 0, 0
                 zero_lon, zero_lat = ccrs.PlateCarree().transform_point(
                     center_x-self.dx*(self.nx-1)/2, center_y-self.dy*(self.ny-1)/2, self.projection)
-                self.lowerleft = [zero_lon, zero_lat]
+                self.lowerleft = [zero_lon, zero_lat] # 旋转前的左下角坐标
             else:
                 if len(lowerleft) == 2:
-                    self.lowerleft = lowerleft # 左下角坐标(经纬度)
+                    self.lowerleft = lowerleft # 旋转前的左下角坐标(经纬度)
                 else:
+                    # 这是考虑输入的左下角坐标不是经纬度, 而是某个投影系下的坐标位置, 所以先将其转化为经纬度
                     zero_lon, zero_lat = ccrs.PlateCarree().transform_point(\
                         lowerleft[0], lowerleft[1], lowerleft[2])
-                    self.lowerleft = [zero_lon, zero_lat]
+                    self.lowerleft = [zero_lon, zero_lat] # 旋转前的左下角经纬度
             self.lowerleft_projxy = self.projection.transform_point(
                 self.lowerleft[0], self.lowerleft[1],
                 ccrs.PlateCarree()
-            ) # 计算投影下的坐标
-            self.rotate = 0 if rotate_deg is None else np.deg2rad(rotate_deg)
+            ) # 计算投影下的xy坐标
+            self.rotate = 0 if rotate_deg is None else np.deg2rad(rotate_deg) # 计算旋转的弧度(输入是角度)
             if rotate_poi is None:
-                self.rotate_poi_x, self.rotate_poi_y = 0, 0
+                # 如果没有给定围绕旋转的点位, 则围绕网格中心进行旋转, 注意这里是 (x, y), 而不是 (ix, iy)
+                # 注意需要考虑如果指定的网格中心和投影中心不一致的情况
+                if not center is None:
+                    self.rotate_poi_x, self.rotate_poi_y = center_x, center_y
+                else:
+                    self.rotate_poi_x, self.rotate_poi_y = self.lowerleft_projxy[0] + (self.nx - 1)*self.dx, self.lowerleft_projxy[1] + (self.ny - 1)*self.dy
             else:
+                # 如果
                 self.rotate_poi_x, self.rotate_poi_y = self.projection.transform_point(*rotate_poi, ccrs.PlateCarree())
         finally:
             if debug > 0:
@@ -116,6 +128,7 @@ class model_info_2d(object):
         2022-09-28 11:05:09 Sola 更新为识别传入的对象类型, 判断是否可迭代
         2022-09-28 15:21:07 Sola 增加对proj是否包含相应方法的识别
         2022-09-28 18:25:24 Sola 修正正常情况下未输出ix, iy的bug
+        2025-04-06 20:33:29 Sola 加入坐标旋转的判断
         """
         # 如果是可迭代对象, 则丢给对应的功能处理
         if hasattr(original_x, '__iter__'):
@@ -132,10 +145,10 @@ class model_info_2d(object):
                 # 调用proj的方法计算经纬度
                 ix, iy = self.projection.grid_id_float(lon, lat)
             else: # 如果投影方法本身不具备计算网格ID的方法, 那就手动计算网格
-                x, y = self.projection.transform_point(
-                    original_x, original_y, original_proj)
+                x, y = self.projection.transform_point(original_x, original_y, original_proj)
                 ix = (x - self.lowerleft_projxy[0])/self.dx
                 iy = (y - self.lowerleft_projxy[1])/self.dy
+            ix, iy = self.rotate_grid_revise(ix, iy)
         return ix, iy
 
     def grid_id(self, original_x, original_y, original_proj=ccrs.PlateCarree()):
@@ -161,6 +174,7 @@ class model_info_2d(object):
         2022-09-28 16:40:27 Sola 增加将输入数组转化为numpy数组的功能, 防止传入列表
         2022-10-19 18:52:25 Sola 修正了除错距离的bug
         2023-03-18 15:39:06 Sola 在计算前, 先将数组展开到1维, 返回时折叠
+        2025-04-06 20:33:12 Sola 加入坐标旋转的判断
         注意事项:
             当前存在一个bug, 输入的投影必须是cartopy的投影, 否则无法计算经纬度,
             但是是否有必要在自己写的proj中加入该功能? 需要考虑
@@ -186,6 +200,7 @@ class model_info_2d(object):
             ix_array = ((ix_array - self.lowerleft_projxy[0])/ self.dx).T
             iy_array = ((iy_array - self.lowerleft_projxy[1])/ self.dy).T
         ix_array, iy_array = fold_array(ix_array, iy_array, shape)
+        ix_array, iy_array = self.rotate_grid_revise(ix_array, iy_array)
         return ix_array, iy_array
     
     def grid_ids(self, original_x_array, original_y_array,
@@ -205,13 +220,16 @@ class model_info_2d(object):
         通过网格id获取经纬度坐标
         2022-09-28 16:03:27 Sola 增加判断传入的是数值还是数组的功能
         2022-09-28 16:05:07 Sola 增加判断proj是否有计算网格的功能
+        2025-04-06 20:32:55 Sola 加入坐标旋转的判断
         """
         if hasattr(ix, '__iter__'): # 如果传入的是可迭代对象, 则调用相应功能
             lon, lat = self.grid_lonlats(ix, iy)
         else: # 如果不是, 则由本函数继续运算
+            ix, iy = self.rotate_grid(ix, iy)
             if hasattr(self.projection, 'grid_lonlat'): # 如果投影本身可以计算
                 lon, lat = self.projection.grid_lonlat(ix, iy) # 计算网格对应经纬度
             else: # 如果投影不能根据网格ID计算经纬度, 则手动计算
+                # 这里则是根据网格计算了在给定投影下的坐标XY，然后将其转化为经纬度
                 x = self.lowerleft_projxy[0] + ix * self.dx
                 y = self.lowerleft_projxy[1] + iy * self.dy
                 lon, lat = ccrs.PlateCarree().transform_point(x, y, self.projection)
@@ -224,8 +242,10 @@ class model_info_2d(object):
         2022-09-28 16:08:38 Sola 简化原本的网格计算, 使用转置的方式代替判断返回数组长度
         2022-09-28 16:40:27 Sola 增加将输入数组转化为numpy数组的功能, 防止传入列表
         2023-03-18 15:39:06 Sola 在计算前, 先将数组展开到1维, 返回时折叠
+        2025-04-06 20:33:56 Sola 加入坐标旋转的判断
         """
         ix_array, iy_array, shape = flat_array(np.array(ix_array), np.array(iy_array))
+        ix_array, iy_array = self.rotate_grid(ix_array, iy_array)
         if hasattr(self.projection, 'grid_lonlats'):
             lon_array, lat_array = self.projection.grid_lonlats(ix_array, iy_array)
         else:
@@ -312,6 +332,8 @@ class model_info_2d(object):
                 central_longitude=self.projection.stdlon,
                 globe = self.globe
             )
+        elif self.projection.__class__.__base__ is ccrs.Projection:
+            proj = self.projection
         else:
             proj = ccrs.PlateCarree(globe = self.globe)
         return proj
@@ -334,7 +356,7 @@ class model_info_2d(object):
         """
         if cx is None:
             cx, cy, dx, dy = self.nx/2, self.ny/2, self.nx/2, self.ny/2
-        XLON, XLAT = self.get_grid()
+        # XLON, XLAT = self.get_grid()
         # ys, ye, xs, xe = np.floor(cy-dy), np.ceil(cy+dy), np.floor(cx-dx), np.ceil(cx+dx)
         lon_start, _ = self.grid_lonlat(cx-dx*ratio, cy)
         lon_end, _ = self.grid_lonlat(cx+dx*ratio, cy)
@@ -356,13 +378,52 @@ class model_info_2d(object):
     def is_in_domain(self, origin_x, origin_y, use_float=False):
         """
         用于判断坐标（经纬度）是否在模式网格范围内
+        Update:
+            2025-05-05 00:13:01 Sola 修正使用浮点数计算时的问题
         """
         if use_float:
             ix, iy = self.grid_id_float(origin_x, origin_y)
         else:
             ix, iy = self.grid_id(origin_x, origin_y)
-        result = (0 <= ix) & (ix < self.nx) & (0 <= iy) & (iy < self.ny)
+        result = (0 <= ix) & (ix <= self.nx - 1) & (0 <= iy) & (iy <= self.ny - 1)
         return result
+
+    def rotate_xy(self, x, y, rotate_rad=None):
+        rotate_rad = self.rotate if rotate_rad is None else rotate_rad
+        x_new, y_new = rotate_xy(x, y, self.rotate_poi_x, self.rotate_poi_y, rotate_rad)
+        return x_new, y_new
+    
+    def rotate_xy_revise(self, x, y, rotate_rad=None):
+        rotate_rad = self.rotate if rotate_rad is None else rotate_rad
+        x_new, y_new = rotate_xy(x, y, self.rotate_poi_x, self.rotate_poi_y, -rotate_rad)
+        return x_new, y_new
+    
+    def rotate_grid(self, ix, iy, rotate_rad=None):
+        rotate_rad = self.rotate if rotate_rad is None else rotate_rad
+        if np.sum(np.abs(rotate_rad % (np.pi*2)) > 1e-8):
+            x, y = self.lowerleft_projxy[0] + ix*self.dx, self.lowerleft_projxy[1] + iy*self.dy
+            x_new, y_new = self.rotate_xy(x, y, rotate_rad)
+            ix_new, iy_new = (x_new - self.lowerleft_projxy[0])/self.dx, (y_new - self.lowerleft_projxy[1])/self.dy
+        else:
+            ix_new, iy_new = ix, iy
+        return ix_new, iy_new
+    
+    def rotate_grid_revise(self, ix, iy, rotate_rad=None):
+        rotate_rad = self.rotate if rotate_rad is None else rotate_rad
+        if np.sum(np.abs(rotate_rad % (np.pi*2)) > 1e-8):
+            x, y = self.lowerleft_projxy[0] + ix*self.dx, self.lowerleft_projxy[1] + iy*self.dy
+            x_new, y_new = self.rotate_xy_revise(x, y, rotate_rad)
+            ix_new, iy_new = (x_new - self.lowerleft_projxy[0])/self.dx, (y_new - self.lowerleft_projxy[1])/self.dy
+        else:
+            ix_new, iy_new = ix, iy
+        return ix_new, iy_new
+
+
+def rotate_xy(xx, yy, cx, cy, rad):
+    xx_offset = (xx - cx)*np.cos(rad) - (yy - cy)*np.sin(rad)
+    yy_offset = (xx - cx)*np.sin(rad) + (yy - cy)*np.cos(rad)
+    xx_new, yy_new = cx + xx_offset, cy + yy_offset
+    return xx_new, yy_new
 
 def flat_array(
         x : np.ndarray,
