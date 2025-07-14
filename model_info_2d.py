@@ -37,11 +37,11 @@ class model_info_2d(object):
             dx      : x方向网格距离(在目标网格投影下, 例如兰伯特是米, 等经纬是度)
             dy      : y方向网格距离
         可选参数:
-            lowerleft_lonlat    : 左下角坐标(经纬度)
+            lowerleft_lonlat    : 左下角 (0, 0) 位置坐标 (经纬度)
             nt                  : 每个模式输出文件的时间段个数
-            dt                  : 每个模式输出文件的时间间隔(小时)
+            dt                  : 每个模式输出文件的时间间隔 (小时)
             var_list            : 模式包含的变量列表
-            type                : 模式的类型(只是一个标记)
+            type                : 模式的类型 (只是一个标记)
             globe               : 地球形状设定
             debug               : 设置打印的信息
         更新记录:
@@ -75,6 +75,7 @@ class model_info_2d(object):
                 设计的网格旋转函数需要保证旋转前后中心位置不变，各网格相对位置不变即可
                 注意, 这里输入的左下角坐标与通过中心计算的左下角坐标均为旋转前的
             2025-07-14 15:42:22 Sola v0.0.11 增加select方法, 用于选取某个经纬度范围的数据
+            2025-07-14 23:24:51 Sola v0.0.12 改进了select方法, 并增加了判断是否在某个extent内的功能
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -379,7 +380,7 @@ class model_info_2d(object):
         extent = [constrain_lon(lon_start), constrain_lon(lon_end), constrain_lat(lat_start), constrain_lat(lat_end)]
         return extent
     
-    def is_in_domain(self, origin_x, origin_y, use_float=False):
+    def is_in_domain(self, origin_x, origin_y, use_float=False, extent=None):
         """
         用于判断坐标（经纬度）是否在模式网格范围内
         Update:
@@ -389,7 +390,12 @@ class model_info_2d(object):
             ix, iy = self.grid_id_float(origin_x, origin_y)
         else:
             ix, iy = self.grid_id(origin_x, origin_y)
-        result = (0 <= ix) & (ix <= self.nx - 1) & (0 <= iy) & (iy <= self.ny - 1)
+        if extent is None:
+            xs, xe, ys, ye = 0, self.nx - 1, 0, self.ny - 1
+        else:
+            xs, xe, ys, ye = self.get_select_xy_offset(extent)
+            xe, ye = xe - 1, ye - 1
+        result = (xs <= ix) & (ix <= xe) & (ys <= iy) & (iy <= ye)
         return result
 
     def rotate_xy(self, x, y, rotate_rad=None):
@@ -422,7 +428,10 @@ class model_info_2d(object):
             ix_new, iy_new = ix, iy
         return ix_new, iy_new
     
-    def select(self, data, extent: list = [-180, 180, -90, 90]):
+    def get_select_xy_extent(self, extent: list = [-180, 180, -90, 90]):
+        """
+        根据经纬度范围获取坐标范围
+        """
         nx, ny = self.nx, self.ny
         lon_s, lon_e, lat_s, lat_e = extent
         lon_list = np.concatenate([
@@ -438,10 +447,28 @@ class model_info_2d(object):
             np.linspace(lat_e, lat_s, ny-1)
         ])
         x_list, y_list = self.grid_id_float(lon_list, lat_list)
-        limit_range = lambda x, xs, xe: x + (xs - x)*(x < xs) - (x - (xe - 1))*(x > (xe - 1))
-        x_s, x_e = int(np.ceil(limit_range(np.min(x_list), -0.5, nx-0.5))), int(np.floor(limit_range(np.max(x_list), -0.5, nx-0.5)) + 1)
-        y_s, y_e = int(np.ceil(limit_range(np.min(y_list), -0.5, ny-0.5))), int(np.floor(limit_range(np.max(y_list), -0.5, ny-0.5)) + 1)
-        data_select = data[y_s:y_e, x_s:x_e]
+        xs_float, xe_float, ys_float, ye_float = np.min(x_list), np.max(x_list), np.min(y_list), np.max(y_list)
+        return xs_float, xe_float, ys_float, ye_float
+    
+    def get_select_xy_offset(self, extent: list = [-180, 180, -90, 90]):
+        """
+        根据经纬度范围获取坐标偏移量
+        """
+        nx, ny = self.nx, self.ny
+        xs_float, xe_float, ys_float, ye_float = self.get_select_xy_extent(extent)
+        limit_range = lambda x, vmin, vmax: x + (vmin - x)*(x < vmin) - (x - vmax)*(x > vmax) # x \in [xs, xe]
+        xs, xe, ys, ye = round(xs_float), round(xe_float), round(ys_float), round(ye_float)
+        xs, xe = limit_range(xs, 0, nx-1), limit_range(xe, 0, nx-1)+1
+        ys, ye = limit_range(ys, 0, ny-1), limit_range(ye, 0, ny-1)+1
+        return xs, xe, ys, ye
+
+    
+    def select(self, data, extent: list = [-180, 180, -90, 90]):
+        """
+        根据经纬度范围截取数据
+        """
+        xs, xe, ys, ye = self.get_select_xy_offset(extent)
+        data_select = data[ys:ye, xs:xe]
         return data_select
 
 
