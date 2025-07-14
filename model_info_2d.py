@@ -74,6 +74,7 @@ class model_info_2d(object):
                 2. 在将网格转化为经纬度的时候, 需要先将输入的网格ID旋转回去, 再计算其经纬度
                 设计的网格旋转函数需要保证旋转前后中心位置不变，各网格相对位置不变即可
                 注意, 这里输入的左下角坐标与通过中心计算的左下角坐标均为旋转前的
+            2025-07-14 15:42:22 Sola v0.0.11 增加select方法, 用于选取某个经纬度范围的数据
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -420,6 +421,28 @@ class model_info_2d(object):
         else:
             ix_new, iy_new = ix, iy
         return ix_new, iy_new
+    
+    def select(self, data, extent: list = [-180, 180, -90, 90]):
+        nx, ny = self.nx, self.ny
+        lon_s, lon_e, lat_s, lat_e = extent
+        lon_list = np.concatenate([
+            np.linspace(lon_s, lon_e, nx-1),
+            np.linspace(lon_e, lon_e, ny-1),
+            np.linspace(lon_e, lon_s, nx-1),
+            np.linspace(lon_s, lon_s, ny-1)
+        ])
+        lat_list = np.concatenate([
+            np.linspace(lat_s, lat_s, nx-1),
+            np.linspace(lat_s, lat_e, ny-1),
+            np.linspace(lat_e, lat_e, nx-1),
+            np.linspace(lat_e, lat_s, ny-1)
+        ])
+        x_list, y_list = self.grid_id_float(lon_list, lat_list)
+        limit_range = lambda x, xs, xe: x + (xs - x)*(x < xs) - (x - (xe - 1))*(x > (xe - 1))
+        x_s, x_e = int(np.ceil(limit_range(np.min(x_list), -0.5, nx-0.5))), int(np.floor(limit_range(np.max(x_list), -0.5, nx-0.5)) + 1)
+        y_s, y_e = int(np.ceil(limit_range(np.min(y_list), -0.5, ny-0.5))), int(np.floor(limit_range(np.max(y_list), -0.5, ny-0.5)) + 1)
+        data_select = data[y_s:y_e, x_s:x_e]
+        return data_select
 
 
 def rotate_xy(xx, yy, cx, cy, rad):
