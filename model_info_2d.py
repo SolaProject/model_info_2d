@@ -23,8 +23,9 @@ class model_info_2d(object):
             globe       : ccrs.Globe        = None,
             debug       : int               = 0,
             center      : list              = None,
-            rotate_deg  : Union[int, float] = 0,
+            rotate_deg  : Union[int, float] = None,
             rotate_poi  : list              = None,
+            wind_dir_rad: float             = None,
     ) -> None:
         
         """
@@ -76,6 +77,7 @@ class model_info_2d(object):
                 注意, 这里输入的左下角坐标与通过中心计算的左下角坐标均为旋转前的
             2025-07-14 15:42:22 Sola v0.0.11 增加select方法, 用于选取某个经纬度范围的数据
             2025-07-14 23:24:51 Sola v0.0.12 改进了select方法, 并增加了判断是否在某个extent内的功能
+            2025-08-03 21:51:56 Sola v0.0.13 改进了旋转的输入, 增加了读取 proj4 string 的功能
         测试记录:
             2022-09-28 16:28:10 Sola v2 新的简化网格生成方法测试完成, 结果与旧版一致
             2022-09-28 18:27:59 Sola v2 测试了使用proj_LC投影的相关方法, 网格与WRF一致
@@ -111,7 +113,13 @@ class model_info_2d(object):
                 self.lowerleft[0], self.lowerleft[1],
                 ccrs.PlateCarree()
             ) # 计算投影下的xy坐标
-            self.rotate = 0 if rotate_deg is None else np.deg2rad(rotate_deg) # 计算旋转的弧度(输入是角度)
+            if rotate_deg is None:
+                if wind_dir_rad is None:
+                    self.rotate = 0
+                else:
+                    self.rotate = -wind_dir_rad
+            else:
+                self.rotate = np.deg2rad(rotate_deg) # 计算旋转的弧度(输入是角度)
             if rotate_poi is None:
                 # 如果没有给定围绕旋转的点位, 则围绕网格中心进行旋转, 注意这里是 (x, y), 而不是 (ix, iy)
                 # 注意需要考虑如果指定的网格中心和投影中心不一致的情况
@@ -468,7 +476,7 @@ class model_info_2d(object):
         根据经纬度范围截取数据
         """
         xs, xe, ys, ye = self.get_select_xy_offset(extent)
-        data_select = data[ys:ye, xs:xe]
+        data_select = data[..., ys:ye, xs:xe]
         return data_select
 
 
@@ -563,3 +571,19 @@ def from_ctl(file: str) -> model_info_2d:
                     knowni=knowi, knownj=knowj, stdlon=stdlon, nx=nx, ny=ny)
     model = model_info_2d(proj=proj, nx=nx, ny=ny, dx=dx, dy=dy, lowerleft=proj.grid_lonlat(0, 0))
     return model
+
+def from_ncatts(file: str) -> model_info_2d:
+    """
+    proj4 example:
+        +proj=lcc +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +ellps=sphere +a=6370000 +b=6370000
+        +proj=lonlat
+    """
+    import netCDF4 as nc
+    with nc.Dataset(file) as nf:
+        dx, dy, nx, ny, lowerleft = nf.dx, nf.dy, nf.nx, nf.ny, nf.lowerleft
+        proj = ccrs.CRS(getattr(nf, "proj4", "+latlon"))
+    model = model_info_2d(proj=proj, nx=nx, ny=ny, dx=dx, dy=dy, lowerleft=lowerleft)
+    return model
+
+
+

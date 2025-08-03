@@ -24,8 +24,8 @@ class proj_info(object):
         init=False, wrap=False, rho0=None, nc=None, bigc=None, comp_ll=False, 
         gauss_lat=None, nx=None, ny=None) -> None:
         self.code       = code
-        self.lat1       = lat1      # SW latitude (1,1) in degrees (-90->90N) 格点(1, 1)纬度, 西南角, 度
-        self.lon1       = lon1      # SW longitude (1,1) in degrees (-180->180E) 格点(1, 1)经度, 西南角, 度
+        self.lat1       = lat1      # SW latitude (1,1) in degrees (-90->90N) 格点(1, 1)纬度, 西南角, 度, 如果没有指定 knowj, 则为网格中心
+        self.lon1       = lon1      # SW longitude (1,1) in degrees (-180->180E) 格点(1, 1)经度, 西南角, 度, 如果没有指定 knowi, 则为网格中心
         self.lat0       = lat0
         self.lon0       = lon0
         self.dx         = dx        # Grid spacing in meters at truelats, used x方向网格距, m
